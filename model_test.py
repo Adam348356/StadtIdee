@@ -3,6 +3,7 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 import cv2
+import hashlib
 
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
@@ -14,11 +15,11 @@ st.set_page_config(
 )
 
 st.title("Meine Stadt. Meine Idee.")
-st.write("Lade ein Foto hoch und male deine Stadtidee direkt darauf.")
+st.write("Lade ein Stadtfoto hoch und male deine Ideen direkt darauf.")
 
 
 # --------------------------------
-# 1. Teachable-Machine-Modell laden
+# 1. Modell laden
 # --------------------------------
 
 class CompatibleDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
@@ -70,18 +71,18 @@ if uploaded_file is not None:
     before_image = Image.open(uploaded_file).convert("RGB")
 
     st.subheader("Dein Originalfoto")
-    st.image(before_image, use_column_width=True)
+    st.image(before_image, use_container_width=True)
+
+    # Eindeutiger Schlüssel für jedes Foto
+    image_key = hashlib.md5(
+        uploaded_file.getvalue()
+    ).hexdigest()
 
     # --------------------------------
     # 3. Zeichenfläche vorbereiten
     # --------------------------------
 
     st.subheader("Male deine Idee auf das Foto")
-
-    st.write(
-        "Male zum Beispiel einen Baum, eine Bank "
-        "oder ein Blumenbeet direkt auf dein Foto."
-    )
 
     stroke_color = st.color_picker(
         "Farbe deiner Zeichnung",
@@ -95,7 +96,6 @@ if uploaded_file is not None:
         12
     )
 
-    # Größe der Zeichenfläche bestimmen
     scale = min(
         1.0,
         900 / before_image.width,
@@ -105,30 +105,30 @@ if uploaded_file is not None:
     canvas_width = max(1, int(before_image.width * scale))
     canvas_height = max(1, int(before_image.height * scale))
 
-    # Hintergrundbild passend verkleinern
     canvas_background = before_image.resize(
         (canvas_width, canvas_height),
         Image.Resampling.LANCZOS
     )
 
-    # WICHTIG: Hintergrund in RGBA umwandeln
-    canvas_background = canvas_background.convert("RGBA")
-
     # --------------------------------
-    # 4. Zeichenfläche anzeigen
+    # 4. Zeichenfläche mit Foto
     # --------------------------------
 
     canvas_result = st_canvas(
         fill_color="rgba(0, 0, 0, 0)",
         stroke_width=stroke_width,
         stroke_color=stroke_color,
+
         background_image=canvas_background,
-        background_color="#FFFFFF",
+
         update_streamlit=True,
         height=canvas_height,
         width=canvas_width,
+
         drawing_mode="freedraw",
-        key="stadt_canvas"
+
+        return_image_data=True,
+        key=f"stadt_canvas_{image_key}"
     )
 
     # --------------------------------
@@ -147,7 +147,7 @@ if uploaded_file is not None:
         )
 
         st.subheader("Deine neue Stadtidee")
-        st.image(after_image, use_column_width=True)
+        st.image(after_image, use_container_width=True)
 
         # --------------------------------
         # 6. Zeichnung erkennen
@@ -180,7 +180,6 @@ if uploaded_file is not None:
                 cv2.THRESH_BINARY
             )
 
-            # Zeichnungsstriche verbinden
             kernel = np.ones((15, 15), np.uint8)
 
             mask = cv2.morphologyEx(
@@ -196,7 +195,7 @@ if uploaded_file is not None:
             )
 
             # --------------------------------
-            # 7. Veränderten Bereich finden
+            # 7. Veränderung finden
             # --------------------------------
 
             contours, _ = cv2.findContours(
@@ -212,31 +211,19 @@ if uploaded_file is not None:
 
             if not valid_contours:
 
-                st.warning(
-                    "Keine Zeichnung erkannt. "
-                    "Bitte male etwas deutlicher auf das Foto."
-                )
+                st.warning("Keine Zeichnung erkannt.")
 
             else:
 
-                x_values = []
-                y_values = []
-                x2_values = []
-                y2_values = []
+                boxes = [
+                    cv2.boundingRect(contour)
+                    for contour in valid_contours
+                ]
 
-                for contour in valid_contours:
-
-                    x, y, w, h = cv2.boundingRect(contour)
-
-                    x_values.append(x)
-                    y_values.append(y)
-                    x2_values.append(x + w)
-                    y2_values.append(y + h)
-
-                x1 = min(x_values)
-                y1 = min(y_values)
-                x2 = max(x2_values)
-                y2 = max(y2_values)
+                x1 = min(x for x, y, w, h in boxes)
+                y1 = min(y for x, y, w, h in boxes)
+                x2 = max(x + w for x, y, w, h in boxes)
+                y2 = max(y + h for x, y, w, h in boxes)
 
                 padding = 30
 
@@ -250,10 +237,10 @@ if uploaded_file is not None:
                 )
 
                 st.subheader("Erkannte Veränderung")
-                st.image(crop, caption="Deine Zeichnung")
+                st.image(crop)
 
                 # --------------------------------
-                # 8. Teachable-Machine-Modell
+                # 8. Modell klassifiziert Ausschnitt
                 # --------------------------------
 
                 crop = crop.resize((224, 224))
@@ -264,32 +251,21 @@ if uploaded_file is not None:
                 )
 
                 image_array = image_array / 127.5 - 1
-
-                image_array = np.expand_dims(
-                    image_array,
-                    axis=0
-                )
+                image_array = np.expand_dims(image_array, axis=0)
 
                 prediction = model.predict(
                     image_array,
                     verbose=0
                 )
 
-                class_index = int(
-                    np.argmax(prediction[0])
-                )
-
-                confidence = float(
-                    prediction[0][class_index]
-                )
+                class_index = int(np.argmax(prediction[0]))
+                confidence = float(prediction[0][class_index])
 
                 detected_class = labels[class_index]
 
                 st.subheader("Ergebnis")
 
-                st.success(
-                    f"Erkannt: {detected_class}"
-                )
+                st.success(f"Erkannt: {detected_class}")
 
                 st.write(
                     f"Sicherheit: {confidence * 100:.1f} %"
@@ -297,12 +273,11 @@ if uploaded_file is not None:
 
                 if confidence < 0.60:
                     st.warning(
-                        "Das Modell ist sich unsicher. "
-                        "Bitte überprüfe das Ergebnis."
+                        "Das Modell ist sich bei dieser Erkennung unsicher."
                     )
 
                 # --------------------------------
-                # 9. Position markieren
+                # 9. Position anzeigen
                 # --------------------------------
 
                 result_image = after_array.copy()
@@ -316,10 +291,9 @@ if uploaded_file is not None:
                 )
 
                 st.subheader("Position deiner Zeichnung")
-
                 st.image(
                     result_image,
-                    use_column_width=True
+                    use_container_width=True
                 )
 
 else:
