@@ -3,9 +3,9 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 from gradio_client import Client, handle_file
+from streamlit_drawable_canvas import st_canvas
 import tempfile
 import os
-from streamlit_drawable_canvas import st_canvas
 import io
 
 # ==========================================
@@ -18,7 +18,8 @@ st.set_page_config(
     layout="wide"
 )
 
-MODEL = "black-forest-labs/FLUX.1-Kontext-dev"
+# Öffentlicher Hugging-Face-Space mit Qwen-Image-Edit-2511
+SPACE_ID = "techfreakworm/qwen-image-editor"
 
 # ==========================================
 # 2. DESIGN
@@ -51,11 +52,25 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 # ==========================================
-# 3. VERBINDUNG ZUM QWEN MODELL
+# 3. VERBINDUNG ZUM QWEN-MODELL
 # ==========================================
 
-SPACE_ID = "techfreakworm/qwen-image-editor"
+def get_client():
+
+    # Optionaler Hugging-Face-Token aus Streamlit Secrets
+    token = st.secrets.get("HF_TOKEN", None)
+
+    if token:
+        return Client(
+            SPACE_ID,
+            hf_token=token
+        )
+
+    # Öffentlicher Zugriff ohne Token
+    return Client(SPACE_ID)
+
 
 # ==========================================
 # 4. BILD VORBEREITEN
@@ -64,20 +79,16 @@ SPACE_ID = "techfreakworm/qwen-image-editor"
 def prepare_image(image):
 
     image = image.convert("RGB")
-
-    # Bildgröße begrenzen
     image.thumbnail((1024, 1024))
 
     return image
 
 
 # ==========================================
-# 5. KI-BILDGENERIERUNG
+# 5. KI-BILDGENERIERUNG MIT QWEN
 # ==========================================
 
 def generate_image(original_image, description):
-
-    client = get_client()
 
     prompt = f"""
     Edit the provided photograph of a real urban location.
@@ -91,10 +102,9 @@ def generate_image(original_image, description):
     IMPORTANT INSTRUCTIONS:
 
     - Preserve the original camera perspective.
-    - Preserve the existing buildings and surroundings.
+    - Preserve existing buildings and surroundings.
     - Keep the original street layout.
     - Integrate all requested improvements naturally.
-    - Make the new elements look realistic.
     - Use realistic materials, proportions and lighting.
     - Do not unnecessarily change existing structures.
     - Produce a photorealistic architectural visualization.
@@ -104,13 +114,55 @@ def generate_image(original_image, description):
     have been implemented.
     """
 
-    result = client.image_to_image(
-        image=original_image,
-        prompt=prompt,
-        model=MODEL
-    )
+    # Temporäre Bilddatei für die Gradio-Schnittstelle erstellen
+    with tempfile.TemporaryDirectory() as temp_dir:
 
-    return result
+        image_path = os.path.join(temp_dir, "stadtfoto.png")
+
+        original_image.convert("RGB").save(image_path)
+
+        client = get_client()
+
+        # Qwen-Image-Edit-2511 auf Hugging Face aufrufen
+        result = client.predict(
+            handle_file(image_path),
+            prompt,
+            "Fast",
+            4,
+            1.0,
+            "blurry, low resolution, distorted",
+            -1,
+            "",
+            None,
+            0.9,
+            api_name="/on_edit_generate"
+        )
+
+        if not result or result[0] is None:
+            raise RuntimeError(
+                "Das Modell hat kein Bild zurückgegeben."
+            )
+
+        generated_file = result[0]
+
+        # Gradio kann das Ergebnis als Dateipfad oder Dictionary liefern
+        if isinstance(generated_file, dict):
+            generated_file = (
+                generated_file.get("path")
+                or generated_file.get("url")
+            )
+
+        if isinstance(generated_file, Image.Image):
+            return generated_file.convert("RGB").copy()
+
+        if not generated_file:
+            raise RuntimeError(
+                "Der Bildpfad des Ergebnisses fehlt."
+            )
+
+        # Bild öffnen und unabhängig von der temporären Datei speichern
+        with Image.open(generated_file) as image:
+            return image.convert("RGB").copy()
 
 
 # ==========================================
@@ -165,13 +217,13 @@ if uploaded_file:
     description = st.text_area(
         "Was möchtest du an diesem Ort verändern?",
         placeholder="""
-        Beispielsweise:
+Beispielsweise:
 
-        Ich möchte den Platz grüner und einladender gestalten.
+Ich möchte den Platz grüner und einladender gestalten.
 
-        Es sollen mehrere Bäume und Blumenbeete entstehen.
-        Außerdem wünsche ich mir neue Sitzbänke,
-        Fahrradständer und eine moderne Beleuchtung.
+Es sollen mehrere Bäume und Blumenbeete entstehen.
+Außerdem wünsche ich mir neue Sitzbänke,
+Fahrradständer und eine moderne Beleuchtung.
         """,
         height=180
     )
@@ -260,9 +312,8 @@ if uploaded_file:
     st.header("4. Erstelle deine Stadtvision")
 
     st.write("""
-    Die KI verwendet dein hochgeladenes Foto und
-    deine Beschreibung, um eine neue Visualisierung
-    deines Projekts zu erstellen.
+    Die KI verwendet dein Foto und deine Beschreibung,
+    um eine neue Visualisierung deines Projekts zu erstellen.
     """)
 
     if st.button(
@@ -300,7 +351,15 @@ if uploaded_file:
                 except Exception as error:
 
                     st.error(
-                        f"Bei der Bildgenerierung ist ein Fehler aufgetreten: {error}"
+                        "Bei der Bildgenerierung ist ein Fehler aufgetreten."
+                    )
+
+                    st.code(str(error))
+
+                    st.info(
+                        "Mögliche Ursachen sind eine volle ZeroGPU-Warteschlange, "
+                        "ein vorübergehend nicht erreichbarer Space oder ein "
+                        "aufgebrauchtes Tageslimit."
                     )
 
     # ======================================
@@ -374,4 +433,3 @@ st.markdown("""
 Gemeinsam gestalten wir lebenswerte Städte.
 </center>
 """, unsafe_allow_html=True)
-
