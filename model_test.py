@@ -73,7 +73,7 @@ if uploaded_file is not None:
     before_image = Image.open(uploaded_file).convert("RGB")
 
     st.subheader("Dein Originalfoto")
-    st.image(before_image, use_container_width=True)
+    st.image(before_image, use_column_width=True)
 
     # --------------------------------
     # 3. Zeichnen
@@ -134,14 +134,13 @@ if uploaded_file is not None:
             canvas_result.image_data.astype("uint8")
         ).convert("RGB")
 
-        # Zur ursprünglichen Bildgröße zurückkehren
         after_image = after_image.resize(
             before_image.size,
             Image.Resampling.LANCZOS
         )
 
         st.subheader("Deine neue Stadtidee")
-        st.image(after_image, use_container_width=True)
+        st.image(after_image, use_column_width=True)
 
         # --------------------------------
         # 5. Bilder vergleichen
@@ -167,7 +166,6 @@ if uploaded_file is not None:
                 after_gray
             )
 
-            # Kleine Bildunterschiede herausfiltern
             _, mask = cv2.threshold(
                 difference,
                 25,
@@ -212,7 +210,6 @@ if uploaded_file is not None:
                 )
 
             else:
-                # Alle Zeichnungsbereiche zu einem Ausschnitt verbinden
                 x_values = []
                 y_values = []
                 x2_values = []
@@ -231,7 +228,7 @@ if uploaded_file is not None:
                 x2 = max(x2_values)
                 y2 = max(y2_values)
 
-                # Etwas Rand um die Zeichnung hinzufügen
+                # Etwas Rand hinzufügen
                 padding = 30
 
                 x1 = max(0, x1 - padding)
@@ -309,11 +306,13 @@ if uploaded_file is not None:
                     4
                 )
 
-                st.subheader("Position der erkannten Veränderung")
+                st.subheader(
+                    "Position der erkannten Veränderung"
+                )
 
                 st.image(
                     result_image,
-                    use_container_width=True
+                    use_column_width=True
                 )
 
 else:
