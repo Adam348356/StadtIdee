@@ -1,5 +1,5 @@
 streamlit
 numpy
 Pillow
-streamlit-drawable-canvas
-gradio_client>=1.5.0
+opencv-python-headless
+tensorflow
