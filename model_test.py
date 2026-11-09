@@ -14,14 +14,11 @@ st.set_page_config(
 )
 
 st.title("Meine Stadt. Meine Idee.")
-st.write(
-    "Lade ein Stadtfoto hoch und male selbst neue Ideen darauf, "
-    "zum Beispiel einen Baum oder eine Bank."
-)
+st.write("Lade ein Foto hoch und male deine Stadtidee direkt darauf.")
 
 
 # --------------------------------
-# 1. Modell laden
+# 1. Teachable-Machine-Modell laden
 # --------------------------------
 
 class CompatibleDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
@@ -55,7 +52,7 @@ try:
     model = load_model()
     labels = load_labels()
 except Exception as error:
-    st.error(f"Das Modell konnte nicht geladen werden: {error}")
+    st.error(f"Modell konnte nicht geladen werden: {error}")
     st.stop()
 
 
@@ -76,14 +73,14 @@ if uploaded_file is not None:
     st.image(before_image, use_column_width=True)
 
     # --------------------------------
-    # 3. Zeichnen
+    # 3. Zeichenfläche vorbereiten
     # --------------------------------
 
     st.subheader("Male deine Idee auf das Foto")
 
     st.write(
-        "Du kannst zum Beispiel einen Baum, eine Bank "
-        "oder ein Blumenbeet einzeichnen."
+        "Male zum Beispiel einen Baum, eine Bank "
+        "oder ein Blumenbeet direkt auf dein Foto."
     )
 
     stroke_color = st.color_picker(
@@ -93,12 +90,12 @@ if uploaded_file is not None:
 
     stroke_width = st.slider(
         "Dicke des Stifts",
-        min_value=2,
-        max_value=40,
-        value=12
+        2,
+        40,
+        12
     )
 
-    # Bild für die Zeichenfläche verkleinern
+    # Größe der Zeichenfläche bestimmen
     scale = min(
         1.0,
         900 / before_image.width,
@@ -108,15 +105,25 @@ if uploaded_file is not None:
     canvas_width = max(1, int(before_image.width * scale))
     canvas_height = max(1, int(before_image.height * scale))
 
+    # Hintergrundbild passend verkleinern
     canvas_background = before_image.resize(
-        (canvas_width, canvas_height)
+        (canvas_width, canvas_height),
+        Image.Resampling.LANCZOS
     )
+
+    # WICHTIG: Hintergrund in RGBA umwandeln
+    canvas_background = canvas_background.convert("RGBA")
+
+    # --------------------------------
+    # 4. Zeichenfläche anzeigen
+    # --------------------------------
 
     canvas_result = st_canvas(
         fill_color="rgba(0, 0, 0, 0)",
         stroke_width=stroke_width,
         stroke_color=stroke_color,
         background_image=canvas_background,
+        background_color="#FFFFFF",
         update_streamlit=True,
         height=canvas_height,
         width=canvas_width,
@@ -125,7 +132,7 @@ if uploaded_file is not None:
     )
 
     # --------------------------------
-    # 4. Gezeichnetes Bild erstellen
+    # 5. Gezeichnetes Bild erstellen
     # --------------------------------
 
     if canvas_result.image_data is not None:
@@ -143,7 +150,7 @@ if uploaded_file is not None:
         st.image(after_image, use_column_width=True)
 
         # --------------------------------
-        # 5. Bilder vergleichen
+        # 6. Zeichnung erkennen
         # --------------------------------
 
         if st.button("Meine Zeichnung erkennen"):
@@ -189,7 +196,7 @@ if uploaded_file is not None:
             )
 
             # --------------------------------
-            # 6. Geänderten Bereich finden
+            # 7. Veränderten Bereich finden
             # --------------------------------
 
             contours, _ = cv2.findContours(
@@ -204,18 +211,21 @@ if uploaded_file is not None:
             ]
 
             if not valid_contours:
+
                 st.warning(
-                    "Ich konnte keine Zeichnung erkennen. "
-                    "Male bitte etwas deutlicher auf das Foto."
+                    "Keine Zeichnung erkannt. "
+                    "Bitte male etwas deutlicher auf das Foto."
                 )
 
             else:
+
                 x_values = []
                 y_values = []
                 x2_values = []
                 y2_values = []
 
                 for contour in valid_contours:
+
                     x, y, w, h = cv2.boundingRect(contour)
 
                     x_values.append(x)
@@ -228,7 +238,6 @@ if uploaded_file is not None:
                 x2 = max(x2_values)
                 y2 = max(y2_values)
 
-                # Etwas Rand hinzufügen
                 padding = 30
 
                 x1 = max(0, x1 - padding)
@@ -244,7 +253,7 @@ if uploaded_file is not None:
                 st.image(crop, caption="Deine Zeichnung")
 
                 # --------------------------------
-                # 7. Ausschnitt klassifizieren
+                # 8. Teachable-Machine-Modell
                 # --------------------------------
 
                 crop = crop.resize((224, 224))
@@ -254,9 +263,7 @@ if uploaded_file is not None:
                     dtype=np.float32
                 )
 
-                image_array = (
-                    image_array / 127.5
-                ) - 1
+                image_array = image_array / 127.5 - 1
 
                 image_array = np.expand_dims(
                     image_array,
@@ -278,24 +285,26 @@ if uploaded_file is not None:
 
                 detected_class = labels[class_index]
 
-                st.subheader("Ergebnis der Erkennung")
+                st.subheader("Ergebnis")
 
                 st.success(
                     f"Erkannt: {detected_class}"
                 )
 
                 st.write(
-                    f"Sicherheit des Modells: "
-                    f"{confidence * 100:.1f} %"
+                    f"Sicherheit: {confidence * 100:.1f} %"
                 )
 
                 if confidence < 0.60:
                     st.warning(
-                        "Das Modell ist sich noch unsicher. "
-                        "Das Ergebnis sollte überprüft werden."
+                        "Das Modell ist sich unsicher. "
+                        "Bitte überprüfe das Ergebnis."
                     )
 
-                # Position im Bild zeigen
+                # --------------------------------
+                # 9. Position markieren
+                # --------------------------------
+
                 result_image = after_array.copy()
 
                 cv2.rectangle(
@@ -306,9 +315,7 @@ if uploaded_file is not None:
                     4
                 )
 
-                st.subheader(
-                    "Position der erkannten Veränderung"
-                )
+                st.subheader("Position deiner Zeichnung")
 
                 st.image(
                     result_image,
@@ -316,6 +323,4 @@ if uploaded_file is not None:
                 )
 
 else:
-    st.info(
-        "Lade zuerst ein Foto hoch, damit du darauf zeichnen kannst."
-    )
+    st.info("Bitte lade zuerst ein Stadtfoto hoch.")
