@@ -1,12 +1,13 @@
-
 import streamlit as st
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 from gradio_client import Client, handle_file
 from streamlit_drawable_canvas import st_canvas
 import tempfile
 import os
 import io
+import hashlib
+
 
 # ==========================================
 # 1. SEITENEINSTELLUNGEN
@@ -18,8 +19,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# Öffentlicher Hugging-Face-Space mit Qwen-Image-Edit-2511
 SPACE_ID = "techfreakworm/qwen-image-editor"
+
 
 # ==========================================
 # 2. DESIGN
@@ -49,6 +50,12 @@ st.markdown("""
         border: none;
         padding: 10px 20px;
     }
+
+    .footer {
+        text-align: center;
+        color: #54715E;
+        padding: 15px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -57,8 +64,12 @@ st.markdown("""
 # 3. VERBINDUNG ZUM QWEN-MODELL
 # ==========================================
 
+@st.cache_resource
 def get_client():
-
+    """
+    Erstellt eine Verbindung zum öffentlichen
+    Hugging-Face-Space.
+    """
     return Client(SPACE_ID)
 
 
@@ -67,15 +78,66 @@ def get_client():
 # ==========================================
 
 def prepare_image(image):
+    """
+    Richtet das Bild korrekt aus und
+    reduziert die Größe für die KI.
+    """
 
+    image = ImageOps.exif_transpose(image)
     image = image.convert("RGB")
+
     image.thumbnail((1024, 1024))
 
     return image
 
 
 # ==========================================
-# 5. KI-BILDGENERIERUNG MIT QWEN
+# 5. ERGEBNISBILD AUSLESEN
+# ==========================================
+
+def load_generated_image(result):
+    """
+    Liest das zurückgegebene Bild aus
+    der Gradio-Schnittstelle.
+    """
+
+    if not result:
+        raise RuntimeError(
+            "Das Modell hat kein Ergebnis zurückgegeben."
+        )
+
+    generated_file = result[0]
+
+    if generated_file is None:
+        raise RuntimeError(
+            "Das Modell hat kein Bild zurückgegeben."
+        )
+
+    if isinstance(generated_file, Image.Image):
+        return generated_file.convert("RGB").copy()
+
+    if isinstance(generated_file, np.ndarray):
+        return Image.fromarray(
+            generated_file.astype(np.uint8)
+        ).convert("RGB")
+
+    if isinstance(generated_file, dict):
+        generated_file = (
+            generated_file.get("path")
+            or generated_file.get("url")
+        )
+
+    if not generated_file:
+        raise RuntimeError(
+            "Der Bildpfad des Ergebnisses fehlt."
+        )
+
+    with Image.open(generated_file) as image:
+        return image.convert("RGB").copy()
+
+
+# ==========================================
+# 6. KI-BILDGENERIERUNG MIT QWEN
 # ==========================================
 
 def generate_image(original_image, description):
@@ -104,16 +166,18 @@ def generate_image(original_image, description):
     have been implemented.
     """
 
-    # Temporäre Bilddatei für die Gradio-Schnittstelle erstellen
     with tempfile.TemporaryDirectory() as temp_dir:
 
-        image_path = os.path.join(temp_dir, "stadtfoto.png")
+        image_path = os.path.join(
+            temp_dir,
+            "stadtfoto.png"
+        )
 
         original_image.convert("RGB").save(image_path)
 
         client = get_client()
 
-        # Qwen-Image-Edit-2511 auf Hugging Face aufrufen
+        # Aufruf der tatsächlichen Gradio-Funktion
         result = client.predict(
             handle_file(image_path),
             prompt,
@@ -128,41 +192,18 @@ def generate_image(original_image, description):
             api_name="/on_edit_generate"
         )
 
-        if not result or result[0] is None:
-            raise RuntimeError(
-                "Das Modell hat kein Bild zurückgegeben."
-            )
-
-        generated_file = result[0]
-
-        # Gradio kann das Ergebnis als Dateipfad oder Dictionary liefern
-        if isinstance(generated_file, dict):
-            generated_file = (
-                generated_file.get("path")
-                or generated_file.get("url")
-            )
-
-        if isinstance(generated_file, Image.Image):
-            return generated_file.convert("RGB").copy()
-
-        if not generated_file:
-            raise RuntimeError(
-                "Der Bildpfad des Ergebnisses fehlt."
-            )
-
-        # Bild öffnen und unabhängig von der temporären Datei speichern
-        with Image.open(generated_file) as image:
-            return image.convert("RGB").copy()
+        return load_generated_image(result)
 
 
 # ==========================================
-# 6. ÜBERSCHRIFT
+# 7. ÜBERSCHRIFT
 # ==========================================
 
 st.title("🌳 Meine Stadt. Meine Idee.")
 
 st.markdown("""
 <div class="intro">
+
 <h3>Gestalte deine Stadt der Zukunft!</h3>
 
 Lade ein Foto eines öffentlichen Ortes hoch und
@@ -170,25 +211,47 @@ beschreibe, wie du diesen Ort verändern möchtest.
 
 Unsere KI erstellt auf Basis deines Fotos und deiner
 Beschreibung eine realistische Visualisierung deiner Idee.
+
 </div>
 """, unsafe_allow_html=True)
 
 
 # ==========================================
-# 7. FOTO HOCHLADEN
+# 8. FOTO HOCHLADEN
 # ==========================================
 
 st.header("1. Ursprüngliches Foto")
 
 uploaded_file = st.file_uploader(
     "Wähle ein Foto deines gewünschten Ortes aus.",
-    type=["jpg", "jpeg", "png"]
+    type=["jpg", "jpeg", "png"],
+    key="city_upload"
 )
+
 
 if uploaded_file:
 
-    original_image = Image.open(uploaded_file)
-    original_image = prepare_image(original_image)
+    # Prüfen, ob ein neues Foto hochgeladen wurde
+    file_hash = hashlib.sha256(
+        uploaded_file.getvalue()
+    ).hexdigest()
+
+    if st.session_state.get("current_file_hash") != file_hash:
+
+        st.session_state["current_file_hash"] = file_hash
+
+        st.session_state.pop("generated_image", None)
+        st.session_state.pop("source_image", None)
+
+    try:
+
+        original_image = Image.open(uploaded_file)
+        original_image = prepare_image(original_image)
+
+    except Exception:
+
+        st.error("Das Foto konnte nicht geöffnet werden.")
+        st.stop()
 
     st.image(
         original_image,
@@ -198,14 +261,16 @@ if uploaded_file:
 
     st.divider()
 
+
     # ======================================
-    # 8. BESCHREIBUNG
+    # 9. BESCHREIBUNG
     # ======================================
 
     st.header("2. Beschreibe deine Veränderung")
 
     description = st.text_area(
         "Was möchtest du an diesem Ort verändern?",
+
         placeholder="""
 Beispielsweise:
 
@@ -215,13 +280,15 @@ Es sollen mehrere Bäume und Blumenbeete entstehen.
 Außerdem wünsche ich mir neue Sitzbänke,
 Fahrradständer und eine moderne Beleuchtung.
         """,
+
         height=180
     )
 
     st.divider()
 
+
     # ======================================
-    # 9. OPTIONALE BILDBEARBEITUNG
+    # 10. OPTIONALE BILDBEARBEITUNG
     # ======================================
 
     st.header("3. Gestalte dein Foto (optional)")
@@ -270,14 +337,23 @@ Fahrradständer und eine moderne Beleuchtung.
 
         canvas_result = st_canvas(
             fill_color="rgba(0, 170, 85, 0.25)",
+
             stroke_width=stroke_width,
+
             stroke_color=stroke_color,
+
             background_image=original_image,
+
             update_streamlit=True,
+
             height=original_image.height,
+
             width=original_image.width,
+
             drawing_mode=drawing_mode,
+
             return_image_data=True,
+
             key="city_canvas"
         )
 
@@ -295,8 +371,9 @@ Fahrradständer und eine moderne Beleuchtung.
 
     st.divider()
 
+
     # ======================================
-    # 10. KI-BILD GENERIEREN
+    # 11. KI-BILD GENERIEREN
     # ======================================
 
     st.header("4. Erstelle deine Stadtvision")
@@ -332,7 +409,8 @@ Fahrradständer und eine moderne Beleuchtung.
                     )
 
                     st.session_state["generated_image"] = generated_image
-                    st.session_state["source_image"] = original_image
+
+                    st.session_state["source_image"] = original_image.copy()
 
                     st.success(
                         "Dein Projektbild wurde erfolgreich erstellt!"
@@ -346,14 +424,18 @@ Fahrradständer und eine moderne Beleuchtung.
 
                     st.code(str(error))
 
-                    st.info(
-                        "Mögliche Ursachen sind eine volle ZeroGPU-Warteschlange, "
-                        "ein vorübergehend nicht erreichbarer Space oder ein "
-                        "aufgebrauchtes Tageslimit."
-                    )
+                    st.info("""
+                    Mögliche Ursachen:
+
+                    - Der Hugging-Face-Space ist momentan nicht erreichbar.
+                    - Die ZeroGPU-Warteschlange ist voll.
+                    - Das tägliche GPU-Kontingent ist aufgebraucht.
+                    - Die Verbindung zum Space wurde unterbrochen.
+                    """)
+
 
     # ======================================
-    # 11. ERGEBNIS ANZEIGEN
+    # 12. ERGEBNIS ANZEIGEN
     # ======================================
 
     if "generated_image" in st.session_state:
@@ -384,7 +466,7 @@ Fahrradständer und eine moderne Beleuchtung.
             "Aus deiner Idee ist eine visuelle Stadtvision geworden!"
         )
 
-        # Bild herunterladen
+        # Bild zum Download vorbereiten
 
         buffer = io.BytesIO()
 
@@ -395,11 +477,16 @@ Fahrradständer und eine moderne Beleuchtung.
 
         st.download_button(
             label="📥 Projektbild herunterladen",
+
             data=buffer.getvalue(),
+
             file_name="meine_stadtvision.png",
+
             mime="image/png",
+
             use_container_width=True
         )
+
 
 else:
 
@@ -409,17 +496,19 @@ else:
 
 
 # ==========================================
-# 12. FOOTER
+# 13. FOOTER
 # ==========================================
 
 st.divider()
 
 st.markdown("""
-<center>
+<div class="footer">
+
 <b>Meine Stadt. Meine Idee.</b>
 
-<br>
+<br><br>
 
 Gemeinsam gestalten wir lebenswerte Städte.
-</center>
+
+</div>
 """, unsafe_allow_html=True)
