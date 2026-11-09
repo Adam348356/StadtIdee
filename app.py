@@ -59,16 +59,6 @@ st.markdown("""
 
 def get_client():
 
-    # Optionaler Hugging-Face-Token aus Streamlit Secrets
-    token = st.secrets.get("HF_TOKEN", None)
-
-    if token:
-        return Client(
-            SPACE_ID,
-            hf_token=token
-        )
-
-    # Öffentlicher Zugriff ohne Token
     return Client(SPACE_ID)
 
 
