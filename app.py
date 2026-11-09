@@ -2,7 +2,9 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
-from huggingface_hub import InferenceClient
+from gradio_client import Client, handle_file
+import tempfile
+import os
 from streamlit_drawable_canvas import st_canvas
 import io
 
@@ -50,24 +52,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. HUGGING FACE VERBINDUNG
+# 3. VERBINDUNG ZUM QWEN MODELL
 # ==========================================
 
-def get_client():
-
-    token = st.secrets.get("HF_TOKEN", None)
-
-    if not token:
-        raise ValueError(
-            "Hugging Face Token fehlt. "
-            "Bitte hinterlege HF_TOKEN in secrets.toml."
-        )
-
-    return InferenceClient(
-        provider="fal-ai",
-        api_key=token
-    )
-
+SPACE_ID = "techfreakworm/qwen-image-editor"
 
 # ==========================================
 # 4. BILD VORBEREITEN
