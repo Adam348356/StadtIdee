@@ -4,6 +4,11 @@ import tensorflow as tf
 import numpy as np
 from PIL import Image, ImageOps
 
+
+
+st.write("Python-Version:", __import__("sys").version)
+st.write("TensorFlow-Version:", tf.__version__)
+st.write("Keras-Version:", tf.keras.__version__)
 # Modell laden und zwischenspeichern
 @st.cache_resource
 def load_model():
