@@ -4,26 +4,27 @@ import tensorflow as tf
 import numpy as np
 import cv2
 
-from PIL import Image, ImageOps, ImageDraw
+from PIL import Image
+from streamlit_drawable_canvas import st_canvas
 
 
 st.set_page_config(
     page_title="Meine Stadt. Meine Idee.",
-    page_icon="🌳",
     layout="wide"
 )
 
-st.title("Meine Stadt. Meine Idee. 🌳")
-st.write("Vergleiche deine Stadtbilder und erkenne neue Objekte.")
+st.title("Meine Stadt. Meine Idee.")
+st.write(
+    "Lade ein Stadtfoto hoch und male selbst neue Ideen darauf, "
+    "zum Beispiel einen Baum oder eine Bank."
+)
 
 
 # --------------------------------
-# Modell-Kompatibilität
+# 1. Modell laden
 # --------------------------------
 
-class CompatibleDepthwiseConv2D(
-    tf.keras.layers.DepthwiseConv2D
-):
+class CompatibleDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
     @classmethod
     def from_config(cls, config):
         config.pop("groups", None)
@@ -53,275 +54,269 @@ def load_labels():
 try:
     model = load_model()
     labels = load_labels()
-    st.success("Modell erfolgreich geladen!")
-
 except Exception as error:
-    st.error("Fehler beim Laden des Modells:")
-    st.exception(error)
+    st.error(f"Das Modell konnte nicht geladen werden: {error}")
     st.stop()
 
 
 # --------------------------------
-# Bild klassifizieren
+# 2. Foto hochladen
 # --------------------------------
 
-def classify_crop(crop):
+uploaded_file = st.file_uploader(
+    "Lade dein Stadtfoto hoch",
+    type=["jpg", "jpeg", "png"]
+)
 
-    image = Image.fromarray(
-        cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-    )
+if uploaded_file is not None:
 
-    image = ImageOps.fit(
-        image,
-        (224, 224),
-        Image.Resampling.LANCZOS
-    )
+    before_image = Image.open(uploaded_file).convert("RGB")
 
-    image_array = np.asarray(image)
-
-    normalized = (
-        image_array.astype(np.float32) / 127.5
-    ) - 1
-
-    data = np.expand_dims(normalized, axis=0)
-
-    prediction = model.predict(data, verbose=0)[0]
-
-    index = np.argmax(prediction)
-
-    return labels[index], float(prediction[index])
-
-
-# --------------------------------
-# Bilder hochladen
-# --------------------------------
-
-st.subheader("1. Stadtbilder hochladen")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    before_file = st.file_uploader(
-        "Vorher-Bild",
-        type=["jpg", "jpeg", "png"],
-        key="before"
-    )
-
-with col2:
-    after_file = st.file_uploader(
-        "Nachher-Bild",
-        type=["jpg", "jpeg", "png"],
-        key="after"
-    )
-
-
-# --------------------------------
-# Bilder vergleichen
-# --------------------------------
-
-if before_file is not None and after_file is not None:
-
-    before = Image.open(before_file).convert("RGB")
-    after = Image.open(after_file).convert("RGB")
-
-    # Gleiche Bildgröße herstellen
-    after = after.resize(
-        before.size,
-        Image.Resampling.LANCZOS
-    )
-
-    before_array = np.array(before)
-    after_array = np.array(after)
-
-    st.subheader("2. Vorher und Nachher")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.image(before, caption="Vorher")
-
-    with col2:
-        st.image(after, caption="Nachher")
+    st.subheader("Dein Originalfoto")
+    st.image(before_image, use_container_width=True)
 
     # --------------------------------
-    # Verbesserter Bildvergleich
+    # 3. Zeichnen
     # --------------------------------
 
-    st.subheader("3. Veränderungen erkennen")
+    st.subheader("Male deine Idee auf das Foto")
 
-    threshold = st.slider(
-        "Empfindlichkeit",
-        min_value=10,
-        max_value=120,
-        value=45
+    st.write(
+        "Du kannst zum Beispiel einen Baum, eine Bank "
+        "oder ein Blumenbeet einzeichnen."
     )
 
-    min_area = st.slider(
-        "Mindestgröße einer Veränderung",
-        min_value=500,
-        max_value=10000,
-        value=1500,
-        step=500
+    stroke_color = st.color_picker(
+        "Farbe deiner Zeichnung",
+        "#228B22"
     )
 
-    before_bgr = cv2.cvtColor(
-        before_array,
-        cv2.COLOR_RGB2BGR
+    stroke_width = st.slider(
+        "Dicke des Stifts",
+        min_value=2,
+        max_value=40,
+        value=12
     )
 
-    after_bgr = cv2.cvtColor(
-        after_array,
-        cv2.COLOR_RGB2BGR
+    # Bild für die Zeichenfläche verkleinern
+    scale = min(
+        1.0,
+        900 / before_image.width,
+        700 / before_image.height
     )
 
-    # Bilder weichzeichnen
-    before_blur = cv2.GaussianBlur(
-        before_bgr, (7, 7), 0
+    canvas_width = max(1, int(before_image.width * scale))
+    canvas_height = max(1, int(before_image.height * scale))
+
+    canvas_background = before_image.resize(
+        (canvas_width, canvas_height)
     )
 
-    after_blur = cv2.GaussianBlur(
-        after_bgr, (7, 7), 0
-    )
-
-    # In Graustufen umwandeln
-    before_gray = cv2.cvtColor(
-        before_blur,
-        cv2.COLOR_BGR2GRAY
-    )
-
-    after_gray = cv2.cvtColor(
-        after_blur,
-        cv2.COLOR_BGR2GRAY
-    )
-
-    # Unterschiede berechnen
-    difference = cv2.absdiff(
-        before_gray,
-        after_gray
-    )
-
-    _, mask = cv2.threshold(
-        difference,
-        threshold,
-        255,
-        cv2.THRESH_BINARY
-    )
-
-    # Kleine Störungen entfernen
-    kernel = np.ones((5, 5), np.uint8)
-
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_OPEN,
-        kernel
-    )
-
-    # Zusammenhängende Bereiche verbinden
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_CLOSE,
-        np.ones((9, 9), np.uint8)
-    )
-
-    # Konturen finden
-    contours, _ = cv2.findContours(
-        mask.copy(),
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
+    canvas_result = st_canvas(
+        fill_color="rgba(0, 0, 0, 0)",
+        stroke_width=stroke_width,
+        stroke_color=stroke_color,
+        background_image=canvas_background,
+        update_streamlit=True,
+        height=canvas_height,
+        width=canvas_width,
+        drawing_mode="freedraw",
+        key="stadt_canvas"
     )
 
     # --------------------------------
-    # Veränderungen klassifizieren
+    # 4. Gezeichnetes Bild erstellen
     # --------------------------------
 
-    result_image = after.copy()
-    draw = ImageDraw.Draw(result_image)
+    if canvas_result.image_data is not None:
 
-    results = []
+        after_image = Image.fromarray(
+            canvas_result.image_data.astype("uint8")
+        ).convert("RGB")
 
-    for contour in contours:
-
-        area = cv2.contourArea(contour)
-
-        if area < min_area:
-            continue
-
-        x, y, w, h = cv2.boundingRect(contour)
-
-        padding = 15
-
-        x1 = max(0, x - padding)
-        y1 = max(0, y - padding)
-
-        x2 = min(after.width, x + w + padding)
-        y2 = min(after.height, y + h + padding)
-
-        crop = after_bgr[y1:y2, x1:x2]
-
-        if crop.size == 0:
-            continue
-
-        category, confidence = classify_crop(crop)
-
-        results.append({
-            "category": category,
-            "confidence": confidence,
-            "position": (x1, y1, x2, y2)
-        })
-
-        draw.rectangle(
-            [x1, y1, x2, y2],
-            outline="red",
-            width=4
+        # Zur ursprünglichen Bildgröße zurückkehren
+        after_image = after_image.resize(
+            before_image.size,
+            Image.Resampling.LANCZOS
         )
 
-    # --------------------------------
-    # Ergebnisse anzeigen
-    # --------------------------------
+        st.subheader("Deine neue Stadtidee")
+        st.image(after_image, use_container_width=True)
 
-    st.subheader("4. Erkannte Veränderungen")
+        # --------------------------------
+        # 5. Bilder vergleichen
+        # --------------------------------
 
-    st.image(
-        result_image,
-        caption="Markierte Veränderungen"
+        if st.button("Meine Zeichnung erkennen"):
+
+            before_array = np.array(before_image)
+            after_array = np.array(after_image)
+
+            before_gray = cv2.cvtColor(
+                before_array,
+                cv2.COLOR_RGB2GRAY
+            )
+
+            after_gray = cv2.cvtColor(
+                after_array,
+                cv2.COLOR_RGB2GRAY
+            )
+
+            difference = cv2.absdiff(
+                before_gray,
+                after_gray
+            )
+
+            # Kleine Bildunterschiede herausfiltern
+            _, mask = cv2.threshold(
+                difference,
+                25,
+                255,
+                cv2.THRESH_BINARY
+            )
+
+            # Zeichnungsstriche verbinden
+            kernel = np.ones((15, 15), np.uint8)
+
+            mask = cv2.morphologyEx(
+                mask,
+                cv2.MORPH_CLOSE,
+                kernel
+            )
+
+            mask = cv2.dilate(
+                mask,
+                np.ones((9, 9), np.uint8),
+                iterations=2
+            )
+
+            # --------------------------------
+            # 6. Geänderten Bereich finden
+            # --------------------------------
+
+            contours, _ = cv2.findContours(
+                mask,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            valid_contours = [
+                contour for contour in contours
+                if cv2.contourArea(contour) > 100
+            ]
+
+            if not valid_contours:
+                st.warning(
+                    "Ich konnte keine Zeichnung erkennen. "
+                    "Male bitte etwas deutlicher auf das Foto."
+                )
+
+            else:
+                # Alle Zeichnungsbereiche zu einem Ausschnitt verbinden
+                x_values = []
+                y_values = []
+                x2_values = []
+                y2_values = []
+
+                for contour in valid_contours:
+                    x, y, w, h = cv2.boundingRect(contour)
+
+                    x_values.append(x)
+                    y_values.append(y)
+                    x2_values.append(x + w)
+                    y2_values.append(y + h)
+
+                x1 = min(x_values)
+                y1 = min(y_values)
+                x2 = max(x2_values)
+                y2 = max(y2_values)
+
+                # Etwas Rand um die Zeichnung hinzufügen
+                padding = 30
+
+                x1 = max(0, x1 - padding)
+                y1 = max(0, y1 - padding)
+                x2 = min(after_image.width, x2 + padding)
+                y2 = min(after_image.height, y2 + padding)
+
+                crop = after_image.crop(
+                    (x1, y1, x2, y2)
+                )
+
+                st.subheader("Erkannte Veränderung")
+                st.image(crop, caption="Deine Zeichnung")
+
+                # --------------------------------
+                # 7. Ausschnitt klassifizieren
+                # --------------------------------
+
+                crop = crop.resize((224, 224))
+
+                image_array = np.asarray(
+                    crop,
+                    dtype=np.float32
+                )
+
+                image_array = (
+                    image_array / 127.5
+                ) - 1
+
+                image_array = np.expand_dims(
+                    image_array,
+                    axis=0
+                )
+
+                prediction = model.predict(
+                    image_array,
+                    verbose=0
+                )
+
+                class_index = int(
+                    np.argmax(prediction[0])
+                )
+
+                confidence = float(
+                    prediction[0][class_index]
+                )
+
+                detected_class = labels[class_index]
+
+                st.subheader("Ergebnis der Erkennung")
+
+                st.success(
+                    f"Erkannt: {detected_class}"
+                )
+
+                st.write(
+                    f"Sicherheit des Modells: "
+                    f"{confidence * 100:.1f} %"
+                )
+
+                if confidence < 0.60:
+                    st.warning(
+                        "Das Modell ist sich noch unsicher. "
+                        "Das Ergebnis sollte überprüft werden."
+                    )
+
+                # Position im Bild zeigen
+                result_image = after_array.copy()
+
+                cv2.rectangle(
+                    result_image,
+                    (x1, y1),
+                    (x2, y2),
+                    (0, 255, 0),
+                    4
+                )
+
+                st.subheader("Position der erkannten Veränderung")
+
+                st.image(
+                    result_image,
+                    use_container_width=True
+                )
+
+else:
+    st.info(
+        "Lade zuerst ein Foto hoch, damit du darauf zeichnen kannst."
     )
-
-    # Vergleichsmaske zur Kontrolle
-    with st.expander("Bildvergleich anzeigen"):
-        st.image(
-            mask,
-            caption="Erkannte Unterschiede",
-            clamp=True
-        )
-
-    if len(results) == 0:
-
-        st.info("Keine Veränderungen gefunden.")
-
-    else:
-
-        st.success(
-            f"{len(results)} veränderte Bereiche gefunden."
-        )
-
-        for i, result in enumerate(results):
-
-            st.markdown(f"### Veränderung {i + 1}")
-
-            st.write(
-                f"**Kategorie:** {result['category']}"
-            )
-
-            st.write(
-                f"**Sicherheit:** "
-                f"{result['confidence'] * 100:.2f} %"
-            )
-
-            x1, y1, x2, y2 = result["position"]
-
-            st.write(
-                f"**Koordinaten:** "
-                f"({x1}, {y1}, {x2}, {y2})"
-            )
-
-            st.divider()
