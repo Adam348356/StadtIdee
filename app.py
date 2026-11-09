@@ -1,17 +1,8 @@
+
 import streamlit as st
+import tensorflow as tf
 import numpy as np
 from PIL import Image, ImageOps
-from gradio_client import Client, handle_file
-from streamlit_drawable_canvas import st_canvas
-import tempfile
-import os
-import io
-import hashlib
-
-
-# ==========================================
-# 1. SEITENEINSTELLUNGEN
-# ==========================================
 
 st.set_page_config(
     page_title="Meine Stadt. Meine Idee.",
@@ -19,496 +10,146 @@ st.set_page_config(
     layout="wide"
 )
 
-SPACE_ID = "techfreakworm/qwen-image-editor"
+st.title("Meine Stadt. Meine Idee. 🌳")
+st.write("Teste dein Teachable-Machine-Modell!")
 
+# --------------------------------
+# Modell kompatibel laden
+# --------------------------------
 
-# ==========================================
-# 2. DESIGN
-# ==========================================
+class CompatibleDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
 
-st.markdown("""
-<style>
-    .stApp {
-        background-color: #F5F8F5;
-    }
+    @classmethod
+    def from_config(cls, config):
+        config.pop("groups", None)
+        return cls(**config)
 
-    h1, h2, h3 {
-        color: #245943;
-    }
-
-    .intro {
-        background-color: #E4EFE6;
-        padding: 20px;
-        border-radius: 12px;
-        margin-bottom: 20px;
-    }
-
-    .stButton button {
-        background-color: #347653;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 10px 20px;
-    }
-
-    .footer {
-        text-align: center;
-        color: #54715E;
-        padding: 15px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ==========================================
-# 3. VERBINDUNG ZUM QWEN-MODELL
-# ==========================================
 
 @st.cache_resource
-def get_client():
-    """
-    Erstellt eine Verbindung zum öffentlichen
-    Hugging-Face-Space.
-    """
-    return Client(SPACE_ID)
+def load_model():
+
+    return tf.keras.models.load_model(
+        "model/keras_model.h5",
+        compile=False,
+        custom_objects={
+            "DepthwiseConv2D": CompatibleDepthwiseConv2D
+        }
+    )
 
 
-# ==========================================
-# 4. BILD VORBEREITEN
-# ==========================================
+# --------------------------------
+# Kategorien laden
+# --------------------------------
 
-def prepare_image(image):
-    """
-    Richtet das Bild korrekt aus und
-    reduziert die Größe für die KI.
-    """
+@st.cache_data
+def load_labels():
 
-    image = ImageOps.exif_transpose(image)
-    image = image.convert("RGB")
+    with open(
+        "model/labels.txt",
+        "r",
+        encoding="utf-8"
+    ) as file:
 
-    image.thumbnail((1024, 1024))
-
-    return image
-
-
-# ==========================================
-# 5. ERGEBNISBILD AUSLESEN
-# ==========================================
-
-def load_generated_image(result):
-    """
-    Liest das zurückgegebene Bild aus
-    der Gradio-Schnittstelle.
-    """
-
-    if not result:
-        raise RuntimeError(
-            "Das Modell hat kein Ergebnis zurückgegeben."
-        )
-
-    generated_file = result[0]
-
-    if generated_file is None:
-        raise RuntimeError(
-            "Das Modell hat kein Bild zurückgegeben."
-        )
-
-    if isinstance(generated_file, Image.Image):
-        return generated_file.convert("RGB").copy()
-
-    if isinstance(generated_file, np.ndarray):
-        return Image.fromarray(
-            generated_file.astype(np.uint8)
-        ).convert("RGB")
-
-    if isinstance(generated_file, dict):
-        generated_file = (
-            generated_file.get("path")
-            or generated_file.get("url")
-        )
-
-    if not generated_file:
-        raise RuntimeError(
-            "Der Bildpfad des Ergebnisses fehlt."
-        )
-
-    with Image.open(generated_file) as image:
-        return image.convert("RGB").copy()
+        return [
+            line.strip().split(" ", 1)[-1]
+            for line in file.readlines()
+        ]
 
 
-# ==========================================
-# 6. KI-BILDGENERIERUNG MIT QWEN
-# ==========================================
+# --------------------------------
+# Modell starten
+# --------------------------------
 
-def generate_image(original_image, description):
+try:
 
-    prompt = f"""
-    Edit the provided photograph of a real urban location.
+    model = load_model()
+    labels = load_labels()
 
-    Create a realistic architectural visualization of
-    the proposed urban improvement.
+    st.success("Dein Modell wurde erfolgreich geladen!")
 
-    Requested changes:
-    {description}
+except Exception as error:
 
-    IMPORTANT INSTRUCTIONS:
-
-    - Preserve the original camera perspective.
-    - Preserve existing buildings and surroundings.
-    - Keep the original street layout.
-    - Integrate all requested improvements naturally.
-    - Use realistic materials, proportions and lighting.
-    - Do not unnecessarily change existing structures.
-    - Produce a photorealistic architectural visualization.
-
-    The result should look like a photograph of the
-    location after the proposed urban improvements
-    have been implemented.
-    """
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-
-        image_path = os.path.join(
-            temp_dir,
-            "stadtfoto.png"
-        )
-
-        original_image.convert("RGB").save(image_path)
-
-        client = get_client()
-
-        # Aufruf der tatsächlichen Gradio-Funktion
-        result = client.predict(
-            handle_file(image_path),
-            prompt,
-            "Fast",
-            4,
-            1.0,
-            "blurry, low resolution, distorted",
-            -1,
-            "",
-            None,
-            0.9,
-            api_name="/on_edit_generate"
-        )
-
-        return load_generated_image(result)
+    st.error("Das Modell konnte nicht geladen werden.")
+    st.code(str(error))
+    st.stop()
 
 
-# ==========================================
-# 7. ÜBERSCHRIFT
-# ==========================================
+# --------------------------------
+# Testbild hochladen
+# --------------------------------
 
-st.title("🌳 Meine Stadt. Meine Idee.")
+st.subheader("Modell testen")
 
-st.markdown("""
-<div class="intro">
-
-<h3>Gestalte deine Stadt der Zukunft!</h3>
-
-Lade ein Foto eines öffentlichen Ortes hoch und
-beschreibe, wie du diesen Ort verändern möchtest.
-
-Unsere KI erstellt auf Basis deines Fotos und deiner
-Beschreibung eine realistische Visualisierung deiner Idee.
-
-</div>
-""", unsafe_allow_html=True)
-
-
-# ==========================================
-# 8. FOTO HOCHLADEN
-# ==========================================
-
-st.header("1. Ursprüngliches Foto")
-
-uploaded_file = st.file_uploader(
-    "Wähle ein Foto deines gewünschten Ortes aus.",
-    type=["jpg", "jpeg", "png"],
-    key="city_upload"
+uploaded_image = st.file_uploader(
+    "Lade ein Bild hoch",
+    type=["jpg", "jpeg", "png"]
 )
 
 
-if uploaded_file:
+if uploaded_image is not None:
 
-    # Prüfen, ob ein neues Foto hochgeladen wurde
-    file_hash = hashlib.sha256(
-        uploaded_file.getvalue()
-    ).hexdigest()
-
-    if st.session_state.get("current_file_hash") != file_hash:
-
-        st.session_state["current_file_hash"] = file_hash
-
-        st.session_state.pop("generated_image", None)
-        st.session_state.pop("source_image", None)
-
-    try:
-
-        original_image = Image.open(uploaded_file)
-        original_image = prepare_image(original_image)
-
-    except Exception:
-
-        st.error("Das Foto konnte nicht geöffnet werden.")
-        st.stop()
+    image = Image.open(
+        uploaded_image
+    ).convert("RGB")
 
     st.image(
-        original_image,
-        caption="Ursprünglicher Zustand",
+        image,
+        caption="Dein Testbild",
         use_container_width=True
     )
 
-    st.divider()
-
-
-    # ======================================
-    # 9. BESCHREIBUNG
-    # ======================================
-
-    st.header("2. Beschreibe deine Veränderung")
-
-    description = st.text_area(
-        "Was möchtest du an diesem Ort verändern?",
-
-        placeholder="""
-Beispielsweise:
-
-Ich möchte den Platz grüner und einladender gestalten.
-
-Es sollen mehrere Bäume und Blumenbeete entstehen.
-Außerdem wünsche ich mir neue Sitzbänke,
-Fahrradständer und eine moderne Beleuchtung.
-        """,
-
-        height=180
+    # Bild vorbereiten
+    prepared_image = ImageOps.fit(
+        image,
+        (224, 224),
+        Image.Resampling.LANCZOS
     )
 
-    st.divider()
-
-
-    # ======================================
-    # 10. OPTIONALE BILDBEARBEITUNG
-    # ======================================
-
-    st.header("3. Gestalte dein Foto (optional)")
-
-    use_drawing = st.checkbox(
-        "Ich möchte meine Veränderungen direkt in das Foto einzeichnen."
+    image_array = np.asarray(
+        prepared_image
     )
 
-    edited_image = original_image
+    normalized = (
+        image_array.astype(np.float32) / 127.5
+    ) - 1
 
-    if use_drawing:
+    data = np.expand_dims(
+        normalized,
+        axis=0
+    )
 
-        st.write("""
-        Verwende die Zeichenwerkzeuge, um deine Ideen
-        direkt auf dem Foto zu markieren.
-        """)
+    # Vorhersage
+    prediction = model.predict(
+        data,
+        verbose=0
+    )[0]
 
-        col1, col2 = st.columns(2)
+    index = np.argmax(prediction)
 
-        with col1:
+    # Ergebnis anzeigen
+    st.subheader("Ergebnis")
 
-            drawing_mode = st.selectbox(
-                "Zeichenwerkzeug",
-                [
-                    "freedraw",
-                    "line",
-                    "rect",
-                    "circle",
-                    "transform"
-                ]
-            )
+    st.success(
+        f"Erkannt: {labels[index]}"
+    )
 
-        with col2:
+    st.metric(
+        "Sicherheit",
+        f"{prediction[index] * 100:.2f} %"
+    )
 
-            stroke_width = st.slider(
-                "Strichstärke",
-                1,
-                25,
-                5
-            )
+    # Alle Kategorien anzeigen
+    st.subheader("Alle Erkennungen")
 
-        stroke_color = st.color_picker(
-            "Farbe",
-            "#00AA55"
-        )
-
-        canvas_result = st_canvas(
-            fill_color="rgba(0, 170, 85, 0.25)",
-
-            stroke_width=stroke_width,
-
-            stroke_color=stroke_color,
-
-            background_image=original_image,
-
-            update_streamlit=True,
-
-            height=original_image.height,
-
-            width=original_image.width,
-
-            drawing_mode=drawing_mode,
-
-            return_image_data=True,
-
-            key="city_canvas"
-        )
-
-        if canvas_result.image_data is not None:
-
-            edited_image = Image.fromarray(
-                canvas_result.image_data.astype(np.uint8)
-            ).convert("RGB")
-
-            st.image(
-                edited_image,
-                caption="Deine bearbeitete Vorlage",
-                use_container_width=True
-            )
-
-    st.divider()
-
-
-    # ======================================
-    # 11. KI-BILD GENERIEREN
-    # ======================================
-
-    st.header("4. Erstelle deine Stadtvision")
-
-    st.write("""
-    Die KI verwendet dein Foto und deine Beschreibung,
-    um eine neue Visualisierung deines Projekts zu erstellen.
-    """)
-
-    if st.button(
-        "✨ Mein Projektbild generieren",
-        use_container_width=True
+    for label, probability in zip(
+        labels,
+        prediction
     ):
 
-        if not description.strip():
-
-            st.warning(
-                "Bitte beschreibe zuerst deine gewünschte Veränderung."
-            )
-
-        else:
-
-            with st.spinner(
-                "Die KI gestaltet deine Stadtvision. "
-                "Das kann einen Moment dauern..."
-            ):
-
-                try:
-
-                    generated_image = generate_image(
-                        edited_image,
-                        description
-                    )
-
-                    st.session_state["generated_image"] = generated_image
-
-                    st.session_state["source_image"] = original_image.copy()
-
-                    st.success(
-                        "Dein Projektbild wurde erfolgreich erstellt!"
-                    )
-
-                except Exception as error:
-
-                    st.error(
-                        "Bei der Bildgenerierung ist ein Fehler aufgetreten."
-                    )
-
-                    st.code(str(error))
-
-                    st.info("""
-                    Mögliche Ursachen:
-
-                    - Der Hugging-Face-Space ist momentan nicht erreichbar.
-                    - Die ZeroGPU-Warteschlange ist voll.
-                    - Das tägliche GPU-Kontingent ist aufgebraucht.
-                    - Die Verbindung zum Space wurde unterbrochen.
-                    """)
-
-
-    # ======================================
-    # 12. ERGEBNIS ANZEIGEN
-    # ======================================
-
-    if "generated_image" in st.session_state:
-
-        st.divider()
-
-        st.header("5. Deine fertige Stadtvision")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-
-            st.image(
-                st.session_state["source_image"],
-                caption="Vorher – ursprünglicher Zustand",
-                use_container_width=True
-            )
-
-        with col2:
-
-            st.image(
-                st.session_state["generated_image"],
-                caption="Nachher – KI-generierte Vision",
-                use_container_width=True
-            )
-
-        st.success(
-            "Aus deiner Idee ist eine visuelle Stadtvision geworden!"
+        st.write(
+            f"**{label}:** {probability * 100:.2f} %"
         )
 
-        # Bild zum Download vorbereiten
-
-        buffer = io.BytesIO()
-
-        st.session_state["generated_image"].save(
-            buffer,
-            format="PNG"
+        st.progress(
+            float(probability)
         )
-
-        st.download_button(
-            label="📥 Projektbild herunterladen",
-
-            data=buffer.getvalue(),
-
-            file_name="meine_stadtvision.png",
-
-            mime="image/png",
-
-            use_container_width=True
-        )
-
-
-else:
-
-    st.info(
-        "Bitte lade zunächst ein Foto hoch, um zu beginnen."
-    )
-
-
-# ==========================================
-# 13. FOOTER
-# ==========================================
-
-st.divider()
-
-st.markdown("""
-<div class="footer">
-
-<b>Meine Stadt. Meine Idee.</b>
-
-<br><br>
-
-Gemeinsam gestalten wir lebenswerte Städte.
-
-</div>
-""", unsafe_allow_html=True)
