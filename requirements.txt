@@ -4,4 +4,4 @@ huggingface_hub>=0.30.0
 Pillow>=10.0.0
 streamlit-drawable-canvas>=0.9.3
 numpy
-
+gradio_client
