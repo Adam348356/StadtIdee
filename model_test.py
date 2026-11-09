@@ -62,7 +62,7 @@ except Exception as error:
 
 
 # --------------------------------
-# Objekt klassifizieren
+# Bild klassifizieren
 # --------------------------------
 
 def classify_crop(crop):
@@ -124,7 +124,7 @@ if before_file is not None and after_file is not None:
     before = Image.open(before_file).convert("RGB")
     after = Image.open(after_file).convert("RGB")
 
-    # Nachher-Bild auf gleiche Größe bringen
+    # Gleiche Bildgröße herstellen
     after = after.resize(
         before.size,
         Image.Resampling.LANCZOS
@@ -144,24 +144,24 @@ if before_file is not None and after_file is not None:
         st.image(after, caption="Nachher")
 
     # --------------------------------
-    # Bilddifferenz berechnen
+    # Verbesserter Bildvergleich
     # --------------------------------
 
     st.subheader("3. Veränderungen erkennen")
 
     threshold = st.slider(
-        "Empfindlichkeit des Vergleichs",
+        "Empfindlichkeit",
         min_value=10,
-        max_value=100,
-        value=30
+        max_value=120,
+        value=45
     )
 
     min_area = st.slider(
         "Mindestgröße einer Veränderung",
-        min_value=100,
-        max_value=5000,
-        value=500,
-        step=100
+        min_value=500,
+        max_value=10000,
+        value=1500,
+        step=500
     )
 
     before_bgr = cv2.cvtColor(
@@ -174,23 +174,40 @@ if before_file is not None and after_file is not None:
         cv2.COLOR_RGB2BGR
     )
 
-    difference = cv2.absdiff(
-        before_bgr,
-        after_bgr
+    # Bilder weichzeichnen
+    before_blur = cv2.GaussianBlur(
+        before_bgr, (7, 7), 0
     )
 
-    gray = cv2.cvtColor(
-        difference,
+    after_blur = cv2.GaussianBlur(
+        after_bgr, (7, 7), 0
+    )
+
+    # In Graustufen umwandeln
+    before_gray = cv2.cvtColor(
+        before_blur,
         cv2.COLOR_BGR2GRAY
     )
 
+    after_gray = cv2.cvtColor(
+        after_blur,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    # Unterschiede berechnen
+    difference = cv2.absdiff(
+        before_gray,
+        after_gray
+    )
+
     _, mask = cv2.threshold(
-        gray,
+        difference,
         threshold,
         255,
         cv2.THRESH_BINARY
     )
 
+    # Kleine Störungen entfernen
     kernel = np.ones((5, 5), np.uint8)
 
     mask = cv2.morphologyEx(
@@ -199,12 +216,14 @@ if before_file is not None and after_file is not None:
         kernel
     )
 
-    mask = cv2.dilate(
+    # Zusammenhängende Bereiche verbinden
+    mask = cv2.morphologyEx(
         mask,
-        kernel,
-        iterations=2
+        cv2.MORPH_CLOSE,
+        np.ones((9, 9), np.uint8)
     )
 
+    # Konturen finden
     contours, _ = cv2.findContours(
         mask.copy(),
         cv2.RETR_EXTERNAL,
@@ -247,8 +266,7 @@ if before_file is not None and after_file is not None:
         results.append({
             "category": category,
             "confidence": confidence,
-            "position": (x, y, w, h),
-            "crop": crop
+            "position": (x1, y1, x2, y2)
         })
 
         draw.rectangle(
@@ -257,40 +275,38 @@ if before_file is not None and after_file is not None:
             width=4
         )
 
+    # --------------------------------
+    # Ergebnisse anzeigen
+    # --------------------------------
+
     st.subheader("4. Erkannte Veränderungen")
 
     st.image(
         result_image,
-        caption="Nachher-Bild mit markierten Veränderungen"
+        caption="Markierte Veränderungen"
     )
+
+    # Vergleichsmaske zur Kontrolle
+    with st.expander("Bildvergleich anzeigen"):
+        st.image(
+            mask,
+            caption="Erkannte Unterschiede",
+            clamp=True
+        )
 
     if len(results) == 0:
 
-        st.info(
-            "Keine ausreichend großen Veränderungen gefunden. "
-            "Versuche die Empfindlichkeit oder Mindestgröße anzupassen."
-        )
+        st.info("Keine Veränderungen gefunden.")
 
     else:
 
         st.success(
-            f"{len(results)} veränderte Bildbereiche gefunden."
+            f"{len(results)} veränderte Bereiche gefunden."
         )
 
         for i, result in enumerate(results):
 
             st.markdown(f"### Veränderung {i + 1}")
-
-            crop_rgb = cv2.cvtColor(
-                result["crop"],
-                cv2.COLOR_BGR2RGB
-            )
-
-            st.image(
-                crop_rgb,
-                caption="Erkannter Bildausschnitt",
-                width=250
-            )
 
             st.write(
                 f"**Kategorie:** {result['category']}"
@@ -301,10 +317,11 @@ if before_file is not None and after_file is not None:
                 f"{result['confidence'] * 100:.2f} %"
             )
 
-            x, y, w, h = result["position"]
+            x1, y1, x2, y2 = result["position"]
 
             st.write(
-                f"**Position:** X={x}, Y={y}"
+                f"**Koordinaten:** "
+                f"({x1}, {y1}, {x2}, {y2})"
             )
 
             st.divider()
