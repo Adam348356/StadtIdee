@@ -3,14 +3,16 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 import cv2
-
+import hashlib
+from io import BytesIO
 from PIL import Image
+
 from streamlit_drawable_canvas import st_canvas
 
 
-# ==========================================
-# SEITENEINSTELLUNGEN
-# ==========================================
+# =========================================
+# 1. SEITE
+# =========================================
 
 st.set_page_config(
     page_title="Meine Stadt. Meine Idee.",
@@ -19,14 +21,16 @@ st.set_page_config(
 )
 
 st.title("🌳 Meine Stadt. Meine Idee.")
+
 st.write(
-    "Lade ein Foto hoch und gestalte deine eigene Stadt."
+    "Lade ein Foto hoch, zeichne neue Dinge darauf "
+    "und lasse dein KI-Modell die Zeichnung erkennen."
 )
 
 
-# ==========================================
-# 1. KERAS-MODELL LADEN
-# ==========================================
+# =========================================
+# 2. KERAS-MODELL LADEN
+# =========================================
 
 class CompatibleDepthwiseConv2D(
     tf.keras.layers.DepthwiseConv2D
@@ -66,16 +70,16 @@ try:
     labels = load_labels()
 
 except Exception as error:
-    st.error(f"Fehler beim Laden des Modells: {error}")
+    st.error(f"Modellfehler: {error}")
     st.stop()
 
 
-# ==========================================
-# 2. FOTO HOCHLADEN
-# ==========================================
+# =========================================
+# 3. FOTO HOCHLADEN
+# =========================================
 
 uploaded_file = st.file_uploader(
-    "Wähle ein Stadtfoto aus",
+    "Lade dein Stadtfoto hoch",
     type=["jpg", "jpeg", "png"]
 )
 
@@ -87,140 +91,147 @@ if uploaded_file is None:
 original = Image.open(uploaded_file).convert("RGB")
 
 st.subheader("Dein Originalfoto")
-st.image(original)
+st.image(original, width="stretch")
 
 
-# ==========================================
-# 3. ZEICHENFLÄCHE VORBEREITEN
-# ==========================================
+# =========================================
+# 4. ZEICHENFLÄCHE VORBEREITEN
+# =========================================
 
-st.subheader("✏️ Gestalte deine Stadt")
+st.subheader("✏️ Zeichne deine Stadtidee")
 
 st.write(
-    "Male direkt auf das Foto. "
-    "Du kannst zum Beispiel Bäume, Bänke "
-    "oder Blumenbeete ergänzen."
+    "Das Foto soll direkt unter deiner Zeichnung liegen. "
+    "Male beispielsweise einen Baum, eine Bank "
+    "oder ein Blumenbeet."
 )
 
-stroke_color = st.color_picker(
-    "Farbe deiner Zeichnung",
+color = st.color_picker(
+    "Zeichenfarbe",
     "#228B22"
 )
 
-stroke_width = st.slider(
+brush_size = st.slider(
     "Stiftdicke",
     min_value=2,
     max_value=40,
     value=12
 )
 
-# Foto proportional verkleinern,
-# damit die Zeichenfläche nicht zu groß wird.
-
+# Bild proportional verkleinern
 scale = min(
     1.0,
     900 / original.width,
     700 / original.height
 )
 
-canvas_width = max(
-    1,
-    int(original.width * scale)
-)
-
-canvas_height = max(
-    1,
-    int(original.height * scale)
-)
-
-# Foto exakt auf Zeichenflächengröße bringen.
+canvas_width = max(1, int(original.width * scale))
+canvas_height = max(1, int(original.height * scale))
 
 background = original.resize(
     (canvas_width, canvas_height),
     Image.Resampling.LANCZOS
 )
 
+# Bild als PNG-Bytes vorbereiten.
+# Diese Übergabe vermeidet Probleme bei der
+# Übertragung von Pillow-Bildern an die Canvas.
 
-# ==========================================
-# 4. ZEICHENFLÄCHE MIT FOTO
-# ==========================================
+buffer = BytesIO()
+background.save(buffer, format="PNG")
+background_bytes = buffer.getvalue()
+
+photo_key = hashlib.md5(
+    uploaded_file.getvalue()
+).hexdigest()
+
+
+# =========================================
+# 5. ZEICHENFLÄCHE ANZEIGEN
+# =========================================
+
+st.info("Hier kannst du direkt auf deinem Foto malen.")
 
 canvas_result = st_canvas(
-
-    # Transparente Zeichenfarbe
     fill_color="rgba(0, 0, 0, 0)",
+    stroke_width=brush_size,
+    stroke_color=color,
 
-    stroke_color=stroke_color,
-    stroke_width=stroke_width,
+    background_image=background_bytes,
+    background_image_fit="stretch",
 
-    # DAS HOCHGELADENE FOTO ALS HINTERGRUND
-    background_image=background,
-
-    # Zeichenfläche
     width=canvas_width,
     height=canvas_height,
 
     drawing_mode="freedraw",
-
     update_streamlit=True,
 
-    # Bilddaten zurück an Python senden
     return_image_data=True,
 
-    key="stadt_zeichenflaeche"
-
+    key=f"canvas_{photo_key}"
 )
 
 
-# ==========================================
-# 5. ZEICHNUNG MIT ORIGINALFOTO VERBINDEN
-# ==========================================
+# =========================================
+# 6. PRÜFEN, OB WIRKLICH GEMALT WURDE
+# =========================================
+
+if canvas_result.json_data is None:
+    st.info("Male etwas auf das Foto, um fortzufahren.")
+    st.stop()
+
+objects = canvas_result.json_data.get("objects", [])
+
+if len(objects) == 0:
+    st.info(
+        "Du hast noch nichts eingezeichnet. "
+        "Male beispielsweise einen Baum auf das Foto."
+    )
+    st.stop()
 
 if canvas_result.image_data is None:
-
-    st.warning("Die Zeichenfläche wurde noch nicht geladen.")
-
+    st.warning("Die Zeichnung konnte nicht geladen werden.")
     st.stop()
 
 
-# Zurückgegebenes Bild als RGBA öffnen.
-overlay = Image.fromarray(
+# =========================================
+# 7. ZEICHNUNG MIT FOTO ZUSAMMENFÜHREN
+# =========================================
+
+drawing = Image.fromarray(
     canvas_result.image_data.astype(np.uint8)
 ).convert("RGBA")
 
-# Hintergrund ebenfalls in RGBA umwandeln.
 background_rgba = background.convert("RGBA")
 
-# Zeichnung über das Foto legen.
+# Transparente Zeichnung auf das Originalfoto legen
 combined = Image.alpha_composite(
     background_rgba,
-    overlay
+    drawing
 )
 
-# Wieder auf ursprüngliche Bildgröße bringen.
 after_image = combined.convert("RGB").resize(
     original.size,
     Image.Resampling.LANCZOS
 )
 
-st.subheader("Deine gestaltete Stadt")
+st.subheader("Deine neue Stadtidee")
+st.image(after_image, width="stretch")
 
-st.image(after_image)
 
-
-# ==========================================
-# 6. ZEICHNUNG ERKENNEN
-# ==========================================
+# =========================================
+# 8. ERKENNUNG STARTEN
+# =========================================
 
 if st.button(
-    "🔍 Meine Zeichnung erkennen",
+    "🔍 Zeichnung mit KI erkennen",
     type="primary"
 ):
 
     before_array = np.array(original)
     after_array = np.array(after_image)
 
-    # Bilder in Graustufen umwandeln.
+    # Bildvergleich
     before_gray = cv2.cvtColor(
         before_array,
         cv2.COLOR_RGB2GRAY
@@ -231,7 +242,6 @@ if st.button(
         cv2.COLOR_RGB2GRAY
     )
 
-    # Unterschiede zwischen beiden Bildern finden.
     difference = cv2.absdiff(
         before_gray,
         after_gray
@@ -244,11 +254,8 @@ if st.button(
         cv2.THRESH_BINARY
     )
 
-    # Kleine Lücken zwischen Zeichnungsstrichen schließen.
-    kernel = np.ones(
-        (15, 15),
-        np.uint8
-    )
+    # Kleine Lücken schließen
+    kernel = np.ones((15, 15), np.uint8)
 
     mask = cv2.morphologyEx(
         mask,
@@ -262,9 +269,10 @@ if st.button(
         iterations=2
     )
 
-    # ======================================
-    # 7. VERÄNDERTEN BEREICH FINDEN
-    # ======================================
+
+    # =====================================
+    # 9. GEÄNDERTEN BEREICH FINDEN
+    # =====================================
 
     contours, _ = cv2.findContours(
         mask,
@@ -272,25 +280,21 @@ if st.button(
         cv2.CHAIN_APPROX_SIMPLE
     )
 
-    valid_contours = [
-        contour
-        for contour in contours
-        if cv2.contourArea(contour) > 100
+    contours = [
+        c for c in contours
+        if cv2.contourArea(c) > 100
     ]
 
-    if not valid_contours:
-
+    if not contours:
         st.warning(
-            "Es wurde keine Veränderung gefunden. "
-            "Bitte male etwas auf das Foto."
+            "Es konnte kein ausreichend großer "
+            "veränderter Bereich gefunden werden."
         )
-
         st.stop()
 
-    # Alle Zeichnungsbereiche zusammenfassen.
     boxes = [
-        cv2.boundingRect(contour)
-        for contour in valid_contours
+        cv2.boundingRect(c)
+        for c in contours
     ]
 
     x1 = min(x for x, y, w, h in boxes)
@@ -299,7 +303,6 @@ if st.button(
     x2 = max(x + w for x, y, w, h in boxes)
     y2 = max(y + h for x, y, w, h in boxes)
 
-    # Etwas Umgebung behalten.
     padding = 40
 
     x1 = max(0, x1 - padding)
@@ -308,20 +311,18 @@ if st.button(
     x2 = min(after_image.width, x2 + padding)
     y2 = min(after_image.height, y2 + padding)
 
-    # Ausschnitt erstellen.
     crop = after_image.crop(
         (x1, y1, x2, y2)
     )
 
-    st.subheader("Erkannter Bildausschnitt")
+    st.subheader("Dein erkannter Bildausschnitt")
     st.image(crop)
 
 
-    # ======================================
-    # 8. KERAS-MODELL KLASSIFIZIERT
-    # ======================================
+    # =====================================
+    # 10. KERAS-KLASSIFIZIERUNG
+    # =====================================
 
-    # Teachable Machine erwartet 224 x 224.
     model_image = crop.resize(
         (224, 224),
         Image.Resampling.LANCZOS
@@ -332,10 +333,7 @@ if st.button(
         dtype=np.float32
     )
 
-    # Normalisierung wie bei Teachable Machine.
-    image_array = (
-        image_array / 127.5
-    ) - 1
+    image_array = image_array / 127.5 - 1
 
     image_array = np.expand_dims(
         image_array,
@@ -358,28 +356,27 @@ if st.button(
     detected_class = labels[class_index]
 
 
-    # ======================================
-    # 9. ERGEBNIS ANZEIGEN
-    # ======================================
+    # =====================================
+    # 11. ERGEBNIS
+    # =====================================
 
-    st.subheader("🎯 Ergebnis der Erkennung")
+    st.subheader("🎯 KI-Ergebnis")
 
     st.success(
-        f"Erkannte Kategorie: {detected_class}"
+        f"Erkannt: {detected_class}"
     )
 
-    st.write(
-        f"Modell-Sicherheit: {confidence * 100:.1f} %"
+    st.metric(
+        "Sicherheit des Modells",
+        f"{confidence * 100:.2f} %"
     )
 
     if confidence < 0.60:
-
         st.warning(
-            "Das Modell ist sich nicht sicher. "
-            "Bitte überprüfe das Ergebnis."
+            "Das Modell ist sich bei dieser Erkennung unsicher."
         )
 
-    # Position der Veränderung markieren.
+    # Position markieren
     result_image = after_array.copy()
 
     cv2.rectangle(
@@ -390,7 +387,9 @@ if st.button(
         4
     )
 
-    st.subheader("Position deiner Zeichnung")
+    st.subheader("Position der Zeichnung")
 
-    st.image(result_image)
-
+    st.image(
+        result_image,
+        width="stretch"
+    )
