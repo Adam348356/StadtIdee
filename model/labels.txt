@@ -1,0 +1,4 @@
+0 Bäume
+1 Blumenbeete
+2 Bänke
+3 Fahrradständer
