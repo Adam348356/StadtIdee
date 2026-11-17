@@ -22,9 +22,8 @@ st.set_page_config(
 st.title("🏙️ Meine Stadt. Meine Idee.")
 
 st.write(
-    "Gestalte deine Stadt selbst: Lade ein Foto hoch, "
-    "zeichne deine Ideen darauf und lasse die KI "
-    "deine Veränderungen erkennen."
+    "Lade ein Foto hoch, zeichne deine Ideen darauf "
+    "und lasse die KI deine Veränderungen erkennen."
 )
 
 
@@ -81,7 +80,28 @@ except Exception as error:
 
 
 # ==========================================
-# 3. FOTO HOCHLADEN
+# 3. VIER MODELLKLASSEN
+# ==========================================
+
+EXPECTED_CLASSES = [
+    "Bäume",
+    "Bänke",
+    "Fahrradständer",
+    "Beete"
+]
+
+if len(labels) != 4:
+
+    st.error(
+        "Dein Modell muss genau vier Klassen enthalten: "
+        "Bäume, Bänke, Fahrradständer und Beete."
+    )
+
+    st.stop()
+
+
+# ==========================================
+# 4. FOTO HOCHLADEN
 # ==========================================
 
 st.header("1. Lade dein Stadtfoto hoch")
@@ -91,6 +111,7 @@ uploaded_file = st.file_uploader(
     type=["jpg", "jpeg", "png"]
 )
 
+
 if uploaded_file is not None:
 
     before_image = Image.open(
@@ -99,16 +120,17 @@ if uploaded_file is not None:
 
     st.success("Dein Foto wurde hochgeladen.")
 
+
     # ==========================================
-    # 4. ZEICHENFENSTER
+    # 5. ZEICHENFENSTER
     # ==========================================
 
     st.header("2. Gestalte deine Stadt")
 
     st.write(
         "Zeichne direkt auf das Foto. "
-        "Du kannst beispielsweise einen Baum, "
-        "eine Bank oder ein Blumenbeet hinzufügen."
+        "Du kannst beispielsweise Bäume, Bänke, "
+        "Fahrradständer oder Beete hinzufügen."
     )
 
     col1, col2 = st.columns(2)
@@ -129,7 +151,8 @@ if uploaded_file is not None:
             value=12
         )
 
-    # Zeichenfläche passend zum Foto berechnen
+
+    # Zeichenfläche berechnen
 
     scale = min(
         1.0,
@@ -151,7 +174,8 @@ if uploaded_file is not None:
         (canvas_width, canvas_height)
     )
 
-    # Zeichenfläche
+
+    # Zeichenfenster
 
     canvas_result = st_canvas(
 
@@ -174,8 +198,9 @@ if uploaded_file is not None:
         key="stadt_zeichenfenster"
     )
 
+
     # ==========================================
-    # 5. BEARBEITETES FOTO ERSTELLEN
+    # 6. BEARBEITETES FOTO ERSTELLEN
     # ==========================================
 
     if canvas_result.image_data is not None:
@@ -184,12 +209,11 @@ if uploaded_file is not None:
             canvas_result.image_data.astype("uint8")
         ).convert("RGB")
 
-        # Auf ursprüngliche Bildgröße zurückskalieren
-
         after_image = after_image.resize(
             before_image.size,
             Image.Resampling.LANCZOS
         )
+
 
         st.header("3. Dein fertiges Projekt")
 
@@ -211,8 +235,9 @@ if uploaded_file is not None:
                 use_container_width=True
             )
 
+
         # ==========================================
-        # 6. DIFFERENZBILD UND KI-ERKENNUNG
+        # 7. DIFFERENZBILD UND KI-ERKENNUNG
         # ==========================================
 
         st.header("4. Veränderungen analysieren")
@@ -231,32 +256,34 @@ if uploaded_file is not None:
                 after_image
             )
 
-            # Farbunterschiede berechnen
+
+            # Bildunterschiede berechnen
 
             difference = cv2.absdiff(
                 before_array,
                 after_array
             )
 
-            # Differenzbild in eine Graustufenmaske umwandeln
+
+            # Graustufen-Differenzbild
 
             difference_gray = cv2.cvtColor(
                 difference,
                 cv2.COLOR_RGB2GRAY
             )
 
-            # Kleine Unterschiede herausfiltern
 
-            threshold_value = 25
+            # Kleine Unterschiede herausfiltern
 
             _, mask = cv2.threshold(
                 difference_gray,
-                threshold_value,
+                25,
                 255,
                 cv2.THRESH_BINARY
             )
 
-            # Benachbarte Zeichnungsbereiche verbinden
+
+            # Zeichnungsbereiche verbinden
 
             kernel_close = np.ones(
                 (15, 15),
@@ -269,7 +296,8 @@ if uploaded_file is not None:
                 kernel_close
             )
 
-            # Bereiche etwas vergrößern
+
+            # Bereiche vergrößern
 
             kernel_dilate = np.ones(
                 (9, 9),
@@ -282,8 +310,9 @@ if uploaded_file is not None:
                 iterations=2
             )
 
+
             # ==========================================
-            # 7. DIFFERENZBILD ANZEIGEN
+            # 8. DIFFERENZBILD ANZEIGEN
             # ==========================================
 
             st.subheader("Dein Differenzbild")
@@ -306,8 +335,9 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
 
+
             # ==========================================
-            # 8. VERÄNDERTE BEREICHE FINDEN
+            # 9. VERÄNDERTE BEREICHE FINDEN
             # ==========================================
 
             contours, _ = cv2.findContours(
@@ -316,13 +346,13 @@ if uploaded_file is not None:
                 cv2.CHAIN_APPROX_SIMPLE
             )
 
-            # Sehr kleine Bereiche ignorieren
 
             valid_contours = [
                 contour
                 for contour in contours
                 if cv2.contourArea(contour) > 100
             ]
+
 
             if not valid_contours:
 
@@ -341,8 +371,9 @@ if uploaded_file is not None:
 
                 result_image = after_array.copy()
 
+
                 # ==========================================
-                # 9. JEDEN BEREICH EINZELN KLASSIFIZIEREN
+                # 10. JEDEN BEREICH KLASSIFIZIEREN
                 # ==========================================
 
                 for index, contour in enumerate(
@@ -353,8 +384,6 @@ if uploaded_file is not None:
                     x, y, w, h = cv2.boundingRect(
                         contour
                     )
-
-                    # Rand um den Ausschnitt hinzufügen
 
                     padding = 30
 
@@ -378,17 +407,20 @@ if uploaded_file is not None:
                         y + h + padding
                     )
 
-                    # Ausschnitt erstellen
+
+                    # Bildausschnitt erstellen
 
                     crop = after_image.crop(
                         (x1, y1, x2, y2)
                     )
 
-                    # Modell benötigt 224 x 224 Pixel
+
+                    # Auf 224 x 224 Pixel verkleinern
 
                     crop = crop.resize(
                         (224, 224)
                     )
+
 
                     image_array = np.asarray(
                         crop,
@@ -404,12 +436,14 @@ if uploaded_file is not None:
                         axis=0
                     )
 
-                    # Vorhersage des trainierten Modells
+
+                    # Modellvorhersage
 
                     prediction = model.predict(
                         image_array,
                         verbose=0
                     )[0]
+
 
                     class_index = int(
                         np.argmax(prediction)
@@ -422,6 +456,7 @@ if uploaded_file is not None:
                     detected_class = labels[
                         class_index
                     ]
+
 
                     # Ergebnis speichern
 
@@ -439,7 +474,8 @@ if uploaded_file is not None:
 
                     })
 
-                    # Rahmen ins Ergebnisbild zeichnen
+
+                    # Bereich im Gesamtbild markieren
 
                     cv2.rectangle(
                         result_image,
@@ -449,7 +485,6 @@ if uploaded_file is not None:
                         4
                     )
 
-                    # Nummer des Bereichs anzeigen
 
                     cv2.putText(
                         result_image,
@@ -461,14 +496,15 @@ if uploaded_file is not None:
                         3
                     )
 
+
                 # ==========================================
-                # 10. ERGEBNISSE ANZEIGEN
+                # 11. ERGEBNISÜBERSICHT
                 # ==========================================
 
                 st.header("5. Ergebnisse der KI")
 
                 st.subheader(
-                    "Übersicht der erkannten Veränderungen"
+                    "Erkannte Objekte"
                 )
 
                 categories = Counter(
@@ -476,15 +512,25 @@ if uploaded_file is not None:
                     for result in results
                 )
 
-                for category, count in categories.items():
+
+                for category in EXPECTED_CLASSES:
+
+                    count = categories.get(
+                        category,
+                        0
+                    )
 
                     st.write(
                         f"**{category}:** {count}"
                     )
 
+
                 st.divider()
 
-                # Jeden Bereich anzeigen
+
+                # ==========================================
+                # 12. EINZELNE ERGEBNISSE
+                # ==========================================
 
                 for result in results:
 
@@ -528,17 +574,19 @@ if uploaded_file is not None:
                             )
 
                         st.write(
-                            f"**Position:** "
-                            f"{result['Position']}"
+                            f"**Position:** {result['Position']}"
                         )
 
                     st.divider()
 
+
                 # ==========================================
-                # 11. GESAMTBILD MIT MARKIERUNGEN
+                # 13. GESAMTBILD MIT MARKIERUNGEN
                 # ==========================================
 
-                st.header("6. Alle Veränderungen im Stadtbild")
+                st.header(
+                    "6. Alle Veränderungen im Stadtbild"
+                )
 
                 st.image(
                     result_image,
