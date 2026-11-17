@@ -9,6 +9,10 @@ from streamlit_drawable_canvas import st_canvas
 from collections import Counter
 
 
+# ==========================================
+# 1. SEITENEINSTELLUNGEN
+# ==========================================
+
 st.set_page_config(
     page_title="Meine Stadt. Meine Idee.",
     page_icon="🏙️",
@@ -16,11 +20,15 @@ st.set_page_config(
 )
 
 st.title("🏙️ Meine Stadt. Meine Idee.")
-st.write("Lade ein Foto hoch und zeichne deine Stadtidee direkt darauf.")
+
+st.write(
+    "Lade ein Foto hoch, zeichne deine Ideen darauf "
+    "und lasse die KI deine Veränderungen erkennen."
+)
 
 
 # ==========================================
-# MODELL LADEN
+# 2. KI-MODELL LADEN
 # ==========================================
 
 class CompatibleDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
@@ -46,7 +54,12 @@ def load_model():
 @st.cache_data
 def load_labels():
 
-    with open("model/labels.txt", "r", encoding="utf-8") as file:
+    with open(
+        "model/labels.txt",
+        "r",
+        encoding="utf-8"
+    ) as file:
+
         return [
             line.strip().split(" ", 1)[-1]
             for line in file.readlines()
@@ -54,13 +67,19 @@ def load_labels():
 
 
 try:
+
     model = load_model()
     labels = load_labels()
 
 except Exception as error:
+
     st.error(f"Modellfehler: {error}")
     st.stop()
 
+
+# ==========================================
+# 3. MODELLKLASSEN
+# ==========================================
 
 EXPECTED_CLASSES = [
     "Bäume",
@@ -70,59 +89,69 @@ EXPECTED_CLASSES = [
 ]
 
 if len(labels) != 4:
-    st.error("Das Modell muss genau vier Klassen enthalten.")
+
+    st.error(
+        "Das Modell muss genau vier Klassen enthalten."
+    )
+
     st.stop()
 
 
 # ==========================================
-# FOTO HOCHLADEN
+# 4. FOTO HOCHLADEN
 # ==========================================
 
 st.header("1. Stadtfoto hochladen")
 
 uploaded_file = st.file_uploader(
-    "Wähle dein Foto aus",
+    "Wähle dein Stadtfoto aus",
     type=["jpg", "jpeg", "png"]
 )
 
 if uploaded_file is None:
+
     st.info("Bitte lade zuerst ein Foto hoch.")
     st.stop()
 
 
-before_image = Image.open(uploaded_file).convert("RGB")
+before_image = Image.open(
+    uploaded_file
+).convert("RGB")
 
 
 # ==========================================
-# ZEICHENWERKZEUGE
+# 5. ZEICHENWERKZEUGE
 # ==========================================
 
 st.header("2. Deine Stadtidee zeichnen")
 
 st.write(
-    "Male beispielsweise Bäume, Bänke, Fahrradständer "
-    "oder Blumenbeete auf dein Foto."
+    "Zeichne direkt auf dein Foto. "
+    "Füge beispielsweise Bäume, Bänke, "
+    "Fahrradständer oder Beete hinzu."
 )
 
 col1, col2 = st.columns(2)
 
 with col1:
+
     stroke_color = st.color_picker(
         "Zeichenfarbe",
         "#228B22"
     )
 
 with col2:
+
     stroke_width = st.slider(
         "Stiftgröße",
-        2,
-        40,
-        12
+        min_value=2,
+        max_value=40,
+        value=12
     )
 
 
 # ==========================================
-# ZEICHENFLÄCHE
+# 6. ZEICHENFLÄCHE VORBEREITEN
 # ==========================================
 
 scale = min(
@@ -131,31 +160,62 @@ scale = min(
     650 / before_image.height
 )
 
-canvas_width = max(1, int(before_image.width * scale))
-canvas_height = max(1, int(before_image.height * scale))
+canvas_width = max(
+    1,
+    int(before_image.width * scale)
+)
+
+canvas_height = max(
+    1,
+    int(before_image.height * scale)
+)
+
+
+# Hintergrundbild vorbereiten
 
 background = before_image.resize(
     (canvas_width, canvas_height)
 )
 
+# Wichtig: RGBA statt RGB verwenden
+background = background.convert("RGBA")
+
+
+st.subheader("Zeichne hier auf deinem Foto:")
+
+# ==========================================
+# 7. ZEICHENFENSTER
+# ==========================================
+
 canvas_result = st_canvas(
+
     fill_color="rgba(0, 0, 0, 0)",
+
     stroke_width=stroke_width,
+
     stroke_color=stroke_color,
+
     background_image=background,
+
     update_streamlit=True,
+
     height=canvas_height,
+
     width=canvas_width,
+
     drawing_mode="freedraw",
+
     key="stadt_canvas"
+
 )
 
 
 # ==========================================
-# BEARBEITETES BILD
+# 8. BEARBEITETES BILD ERSTELLEN
 # ==========================================
 
 if canvas_result.image_data is None:
+
     st.warning("Die Zeichenfläche konnte nicht geladen werden.")
     st.stop()
 
@@ -164,37 +224,44 @@ after_image = Image.fromarray(
     canvas_result.image_data.astype(np.uint8)
 ).convert("RGB")
 
+
 after_image = after_image.resize(
     before_image.size,
     Image.Resampling.LANCZOS
 )
 
 
-st.header("3. Vergleich")
+# ==========================================
+# 9. BILDER VERGLEICHEN
+# ==========================================
+
+st.header("3. Dein Stadtprojekt")
 
 col1, col2 = st.columns(2)
 
 with col1:
+
     st.image(
         before_image,
         caption="Originalfoto",
-        use_container_width=True
+        use_column_width=True
     )
 
 with col2:
+
     st.image(
         after_image,
         caption="Deine Zeichnung",
-        use_container_width=True
+        use_column_width=True
     )
 
 
 # ==========================================
-# BILDER ANALYSIEREN
+# 10. DIFFERENZBILD ERSTELLEN
 # ==========================================
 
 if st.button(
-    "Unterschiede erkennen und klassifizieren",
+    "🔍 Unterschiede erkennen und klassifizieren",
     type="primary",
     use_container_width=True
 ):
@@ -219,7 +286,10 @@ if st.button(
         cv2.THRESH_BINARY
     )
 
-    kernel = np.ones((15, 15), np.uint8)
+    kernel = np.ones(
+        (15, 15),
+        np.uint8
+    )
 
     mask = cv2.morphologyEx(
         mask,
@@ -235,7 +305,7 @@ if st.button(
 
 
     # ==========================================
-    # DIFFERENZBILD
+    # 11. DIFFERENZBILD ANZEIGEN
     # ==========================================
 
     st.header("4. Erkannte Veränderungen")
@@ -243,22 +313,24 @@ if st.button(
     col1, col2 = st.columns(2)
 
     with col1:
+
         st.image(
             difference,
             caption="Differenzbild",
-            use_container_width=True
+            use_column_width=True
         )
 
     with col2:
+
         st.image(
             mask,
-            caption="Erkannte Veränderungsbereiche",
-            use_container_width=True
+            caption="Veränderte Bereiche",
+            use_column_width=True
         )
 
 
     # ==========================================
-    # BEREICHE FINDEN
+    # 12. VERÄNDERTE BEREICHE FINDEN
     # ==========================================
 
     contours, _ = cv2.findContours(
@@ -268,18 +340,27 @@ if st.button(
     )
 
     valid_contours = [
-        contour for contour in contours
+        contour
+        for contour in contours
         if cv2.contourArea(contour) > 100
     ]
 
+
     if not valid_contours:
 
-        st.warning("Keine Veränderungen gefunden.")
+        st.warning(
+            "Es wurden keine Veränderungen gefunden."
+        )
 
     else:
 
         results = []
         result_image = after_array.copy()
+
+
+        # ==========================================
+        # 13. BEREICHE KLASSIFIZIEREN
+        # ==========================================
 
         for index, contour in enumerate(
             valid_contours,
@@ -292,39 +373,72 @@ if st.button(
 
             x1 = max(0, x - padding)
             y1 = max(0, y - padding)
-            x2 = min(after_image.width, x + w + padding)
-            y2 = min(after_image.height, y + h + padding)
+
+            x2 = min(
+                after_image.width,
+                x + w + padding
+            )
+
+            y2 = min(
+                after_image.height,
+                y + h + padding
+            )
 
             crop = after_image.crop(
                 (x1, y1, x2, y2)
             )
 
-            crop = crop.resize((224, 224))
+            crop = crop.resize(
+                (224, 224)
+            )
 
             image_array = np.asarray(
                 crop,
                 dtype=np.float32
             )
 
-            image_array = image_array / 127.5 - 1
-            image_array = np.expand_dims(image_array, axis=0)
+            image_array = (
+                image_array / 127.5
+            ) - 1
+
+            image_array = np.expand_dims(
+                image_array,
+                axis=0
+            )
+
 
             prediction = model.predict(
                 image_array,
                 verbose=0
             )[0]
 
-            class_index = int(np.argmax(prediction))
-            confidence = float(prediction[class_index])
+            class_index = int(
+                np.argmax(prediction)
+            )
+
+            confidence = float(
+                prediction[class_index]
+            )
+
             detected_class = labels[class_index]
 
+
             results.append({
+
                 "Bereich": index,
+
                 "Kategorie": detected_class,
+
                 "Sicherheit": confidence,
+
                 "Ausschnitt": crop,
+
                 "Position": (x1, y1, x2, y2)
+
             })
+
+
+            # Bereich markieren
 
             cv2.rectangle(
                 result_image,
@@ -346,41 +460,54 @@ if st.button(
 
 
         # ==========================================
-        # ERGEBNISSE
+        # 14. ERGEBNISÜBERSICHT
         # ==========================================
 
-        st.header("5. KI-Ergebnisse")
+        st.header("5. Ergebnisse der KI")
 
         categories = Counter(
             result["Kategorie"]
             for result in results
         )
 
-        st.subheader("Zusammenfassung")
+        st.subheader("Erkannte Objekte")
 
         for category in EXPECTED_CLASSES:
-            st.write(
-                f"**{category}:** {categories.get(category, 0)}"
+
+            count = categories.get(
+                category,
+                0
             )
+
+            st.write(
+                f"**{category}:** {count}"
+            )
+
+
+        # ==========================================
+        # 15. EINZELNE ERGEBNISSE
+        # ==========================================
 
         st.divider()
 
         for result in results:
 
             st.subheader(
-                f"Bereich {result['Bereich']}"
+                f"Veränderter Bereich {result['Bereich']}"
             )
 
             col1, col2 = st.columns(2)
 
             with col1:
+
                 st.image(
                     result["Ausschnitt"],
                     caption="Analysierter Ausschnitt",
-                    use_container_width=True
+                    use_column_width=True
                 )
 
             with col2:
+
                 st.write(
                     f"**Kategorie:** {result['Kategorie']}"
                 )
@@ -395,14 +522,22 @@ if st.button(
                 )
 
                 if result["Sicherheit"] < 0.60:
+
                     st.warning("Das Modell ist unsicher.")
+
                 else:
+
                     st.success("Kategorie erkannt.")
 
-        st.header("6. Markiertes Gesamtbild")
+
+        # ==========================================
+        # 16. MARKIERTES GESAMTBILD
+        # ==========================================
+
+        st.header("6. Alle Veränderungen im Stadtbild")
 
         st.image(
             result_image,
-            caption="Alle erkannten Veränderungen",
-            use_container_width=True
+            caption="Markierte Veränderungen",
+            use_column_width=True
         )
