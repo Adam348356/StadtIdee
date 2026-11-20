@@ -1,0 +1,10 @@
+.venv/
+.venv.incomplete.*/
+__pycache__/
+*.py[cod]
+model/*.backup.h5
+model/*.backup.txt
+submitted_projects.sqlite3*
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+.DS_Store
