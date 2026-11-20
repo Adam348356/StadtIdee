@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parent
 MODEL_PATH = ROOT / "model" / "keras_model.h5"
 LABELS_PATH = ROOT / "model" / "labels.txt"
 
-st.set_page_config(page_title="Meine Stadt. Meine Idee.", page_icon="🏙️", layout="wide")
+st.set_page_config(page_title="Meine Stadt, meine Idee", page_icon="🏙️", layout="wide")
 apply_app_theme()
 
 
@@ -268,7 +268,7 @@ if st.query_params.get("projekt") and "main_navigation" not in st.session_state:
 with st.sidebar:
     st.html(
         "<div class='sidebar-brand'><div class='sidebar-brand-icon'>🏙️</div>"
-        "<div>Meine Stadt.<br>Meine Idee.<small>GEMEINSAM GESTALTEN</small></div></div>"
+        "<div>Meine Stadt,<br>meine Idee<small>GEMEINSAM GESTALTEN</small></div></div>"
     )
     selected_page = st.radio(
         "Navigation",
